@@ -61,38 +61,78 @@ func doMap(task *Task, mapf func(string, string) []KeyValue) {
 	// Apply map function
 	kva := mapf(task.Input, string(content))
 
-	// Partition results into r intermediate files, in
-	// the form of mr-task-i; i in range(0, r)
+	// For an assigned task, partition results into r intermediate files,
+	// in the form of mr-task-i; i in range(0, r)
 	files := make(map[string]*os.File)
 
 	for _, kv := range kva {
 		partition := ihash(kv.Key) % task.NumComplementTask
-		output := fmt.Sprintf("mr-%d-%d", task.NumTask, partition)
+		filename := fmt.Sprintf("mr-%d-%d", task.NumTask, partition)
 
 		// Create file if it does not exist
-		if _, ok := files[output]; !ok {
-			file, err := os.Create(output)
+		if _, ok := files[filename]; !ok {
+			file, err := os.OpenFile(filename, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 			if err != nil {
-				log.Fatalf("cannot create intermediate file %v", output)
+				log.Fatalf("cannot create %v", filename)
 			}
 			defer file.Close()
-			files[output] = file
+			files[filename] = file
 		}
 
 		// Append to file
-		enc := json.NewEncoder(files[output])
+		enc := json.NewEncoder(files[filename])
 		err := enc.Encode(&kv)
 
 		if err != nil {
-			log.Fatalf("unable to write to intermediate file %v", output)
+			log.Fatalf("cannot write to %v", filename)
 		}
 	}
 
 	// Deferred calls run here
 }
 
+// Read intermediate files, apply reduce function, and store
+// results in a single output file.
+// This effectively converts the data from row-major to column-major.
 func doReduce(task *Task, reducef func(string, []string) string) {
+	// Create output file
+	outputFilename := fmt.Sprintf("mr-out-%v", task.NumTask)
+	output, err := os.OpenFile(outputFilename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	defer output.Close()
+	if err != nil {
+		log.Fatalf("cannot create %v", outputFilename)
+	}
 
+	kva := make(map[string][]string)
+
+	// Process each intermediate file mr-i-task; i in range(0, m),
+	// where m is the number of mapped files
+	for i := 0; i < task.NumComplementTask; i++ {
+		inputFilename := fmt.Sprintf("mr-i-%v", task.NumTask)
+		input, err := os.Open(inputFilename)
+		if err != nil {
+			log.Fatalf("cannot open %v", inputFilename)
+		}
+
+		dec := json.NewDecoder(input)
+
+		// Partition data by key
+		for dec.More() {
+			var kv KeyValue
+			err := dec.Decode(&kv)
+			if err != nil {
+				log.Fatalf("corrupted data in %v", inputFilename)
+			}
+			kva[kv.Key] = append(kva[kv.Key], kv.Value)
+		}
+	}
+
+	// Apply reduce function
+	for k, v := range kva {
+		if _, err := output.WriteString(reducef(k, v)); err != nil {
+			log.Fatalf("cannot write to %v", outputFilename)
+		}
+	}
 }
 
 //
