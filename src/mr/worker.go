@@ -74,14 +74,14 @@ func doMap(task *Task, mapf func(string, string) []KeyValue) {
 		partition := ihash(kv.Key) % task.NumComplementTask
 		filename := fmt.Sprintf("mr-%d-%d", task.NumTask, partition)
 
-		// Create file if it does not exist
+		// Create temporary files so user cannot observe partially
+		// written file in the presence of a crash
 		if _, ok := files[filename]; !ok {
-			file, err := os.OpenFile(filename, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+			temp, err := os.CreateTemp("", filename)
 			if err != nil {
 				log.Fatalf("cannot create %v", filename)
 			}
-			defer file.Close()
-			files[filename] = file
+			files[filename] = temp
 		}
 
 		// Append to file
@@ -93,7 +93,17 @@ func doMap(task *Task, mapf func(string, string) []KeyValue) {
 		}
 	}
 
-	// Deferred calls run here
+	// Atomically rename files
+	for filename, temp := range files {
+		err := os.Rename(temp.Name(), filename)
+		if err != nil {
+			log.Fatalf("cannot rename intermediate file %v", filename)
+		}
+		err = temp.Close()
+		if err != nil {
+			log.Fatalf("cannot close file %v", filename)
+		}
+	}
 }
 
 // Read intermediate files, apply reduce function, and store
@@ -131,9 +141,10 @@ func doReduce(task *Task, reducef func(string, []string) string) {
 	}
 	sort.Strings(keys)
 
-	// Create output file
+	// Create temporary output file so user cannot observe partially written
+	// files in the presence of a crash
 	outputFilename := fmt.Sprintf("mr-out-%v", task.NumTask)
-	output, err := os.OpenFile(outputFilename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	output, err := os.CreateTemp("", outputFilename)
 	defer output.Close()
 	if err != nil {
 		log.Fatalf("cannot create %v", outputFilename)
@@ -145,6 +156,12 @@ func doReduce(task *Task, reducef func(string, []string) string) {
 		if err != nil {
 			log.Fatalf("cannot write to %v", outputFilename)
 		}
+	}
+
+	// Atomically rename file
+	err = os.Rename(output.Name(), outputFilename)
+	if err != nil {
+		log.Fatalf("cannot rename intermediate file %v", outputFilename)
 	}
 }
 
