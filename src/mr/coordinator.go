@@ -36,7 +36,10 @@ type Coordinator struct {
 
 // Your code here -- RPC handlers for the worker to call.
 func (c *Coordinator) RequestTask(args *interface{}, reply *Task) error {
+	return nil
+}
 
+func (c *Coordinator) ReportTaskCompletion(args *Task, reply *ReportTaskReply) error {
 	return nil
 }
 

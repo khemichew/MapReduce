@@ -31,27 +31,56 @@ func ihash(key string) int {
 }
 
 //
+// Worker requests a task from coordinator via RPC call,
+// executes the allocated task, stores result in (intermediate)
+// output file(s), reports completion to the coordinator, and
+// repeats the cycle until no tasks are assigned by the coordinator.
+//
 // main/mrworker.go calls this function.
 //
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
-	task := Task{}
-
 	for {
-		ok := call("Coordinator.RequestTask", nil, &task)
+		// Request a task
+		task, ok := requestTask()
 		if !ok {
 			break
 		}
 
+		// Execute task and store results
 		switch task.Type {
 		case MapTask:
-			doMap(&task, mapf)
+			doMap(task, mapf)
 		case ReduceTask:
-			doReduce(&task, reducef)
+			doReduce(task, reducef)
+		case NoTask:
+		case ExitTask:
+			break
 		}
 
+		// Reports completion
+		status, ok := reportTaskCompletion(task)
+		if status.Terminate || !ok {
+			break
+		}
+
+		// Wait for a second before requesting again
 		time.Sleep(time.Second)
 	}
+}
+
+// WorkerId generated only unique in a single machine
+func requestTask() (*Task, bool) {
+	args := RequestTaskArgs{WorkerId: os.Getpid()}
+	reply := Task{}
+	ok := call("Coordinator.RequestTask", &args, &reply)
+	return &reply, ok
+}
+
+func reportTaskCompletion(task *Task) (*ReportTaskReply, bool) {
+	reply := ReportTaskReply{}
+	ok := call("Coordinator.ReportTask", task, reply)
+	return &reply, ok
 }
 
 // Read input file, apply map function, and partition results
@@ -71,8 +100,8 @@ func doMap(task *Task, mapf func(string, string) []KeyValue) {
 	files := make(map[string]*os.File)
 
 	for _, kv := range kva {
-		partition := ihash(kv.Key) % task.NumComplementTask
-		filename := fmt.Sprintf("mr-%d-%d", task.NumTask, partition)
+		partition := ihash(kv.Key) % task.NumReduceTask
+		filename := fmt.Sprintf("mr-%d-%d", task.Id, partition)
 
 		// Create temporary files so user cannot observe partially
 		// written file in the presence of a crash
@@ -114,8 +143,8 @@ func doReduce(task *Task, reducef func(string, []string) string) {
 
 	// Process each intermediate file mr-i-task; i in range(0, m),
 	// where m is the number of mapped files
-	for i := 0; i < task.NumComplementTask; i++ {
-		inputFilename := fmt.Sprintf("mr-i-%v", task.NumTask)
+	for i := 0; i < task.NumMapTask; i++ {
+		inputFilename := fmt.Sprintf("mr-i-%v", task.Id)
 		input, err := os.Open(inputFilename)
 		if err != nil {
 			log.Fatalf("cannot open %v", inputFilename)
@@ -143,7 +172,7 @@ func doReduce(task *Task, reducef func(string, []string) string) {
 
 	// Create temporary output file so user cannot observe partially written
 	// files in the presence of a crash
-	outputFilename := fmt.Sprintf("mr-out-%v", task.NumTask)
+	outputFilename := fmt.Sprintf("mr-out-%v", task.Id)
 	output, err := os.CreateTemp("", outputFilename)
 	defer output.Close()
 	if err != nil {
