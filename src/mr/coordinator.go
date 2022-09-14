@@ -9,29 +9,16 @@ import "os"
 import "net/rpc"
 import "net/http"
 
-type TaskState struct {
-	Idle       []string
-	InProgress []string
-	Completed  []string
-}
-
 type Coordinator struct {
 	sync.Mutex
 	// ------- CRITICAL SECTION -------
-	state TaskState
+	mapTasks    Tasks
+	reduceTasks Tasks
 	// --------------------------------
 
 	// ------ Server ------
 	listener net.Listener
 	// --------------------
-
-	// ------ Channels ------
-	done chan bool
-	// ----------------------
-
-	// Constant
-	nReduce int
-	files   []string
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -83,34 +70,14 @@ func (c *Coordinator) shutdownRPCServer() {
 	}
 }
 
-func (c *Coordinator) schedule(taskType TaskType) {
-	//var nTask, nComplement int
-	//switch taskType {
-	//case MapTask:
-	//	nTask, nComplement = len(c.files), c.nReduce
-	//case ReduceTask:
-	//	nTask, nComplement = c.nReduce, len(c.files)
-	//}
-	//
-	//// TODO: Start accepting task requests
-	//switch taskType {
-	//case MapTask:
-	//case ReduceTask:
-	//}
-
-}
-
 //
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
 //
 func (c *Coordinator) Done() bool {
-	select {
-	case <-c.done:
-		return true
-	default:
-		return false
-	}
+	c.Lock()
+	defer c.Unlock()
+	return c.mapTasks.done() && c.reduceTasks.done()
 }
 
 //
@@ -121,23 +88,11 @@ func (c *Coordinator) Done() bool {
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := initialiseCoordinator(files, nReduce)
 	c.startRPCServer()
-
-	// Run in a separate goroutine so main thread can track progress
-	go func() {
-		// Sequential: map task must be completed before reduce task can run
-		c.schedule(MapTask)
-		c.schedule(ReduceTask)
-		// TODO: give out pseudo-exit tasks
-		c.shutdownRPCServer()
-		c.done <- true
-	}()
-
 	return c
 }
 
 func initialiseCoordinator(files []string, nReduce int) *Coordinator {
-	c := Coordinator{files: files, nReduce: nReduce}
-	c.done = make(chan bool)
+	c := Coordinator{}
 
 	return &c
 }

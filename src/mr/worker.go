@@ -47,19 +47,20 @@ func Worker(mapf func(string, string) []KeyValue,
 			break
 		}
 
-		// Execute task and store results
+		// Execute task and store results, then report completion
+		status, ok := &ReportTaskReply{Terminate: false}, true
 		switch task.Type {
 		case MapTask:
 			doMap(task, mapf)
+			status, ok = reportTaskCompletion(task)
 		case ReduceTask:
 			doReduce(task, reducef)
-		case NoTask:
+			status, ok = reportTaskCompletion(task)
+		case VoidTask: // do nothing
 		case ExitTask:
 			break
 		}
 
-		// Reports completion
-		status, ok := reportTaskCompletion(task)
 		if status.Terminate || !ok {
 			break
 		}
