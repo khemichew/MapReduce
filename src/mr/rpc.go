@@ -23,9 +23,18 @@ type ExampleReply struct {
 }
 
 // Add your RPC definitions here.
-type MapTask = string
+type TaskType int
 
-type ReduceTask struct {
+const (
+	MapTask TaskType = iota
+	ReduceTask
+)
+
+type Task struct {
+	Type              TaskType
+	Input             string // only applicable for map tasks
+	NumTask           int
+	NumComplementTask int
 }
 
 // Cook up a unique-ish UNIX-domain socket name

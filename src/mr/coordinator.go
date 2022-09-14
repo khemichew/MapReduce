@@ -1,6 +1,9 @@
 package mr
 
-import "log"
+import (
+	"log"
+	"sync"
+)
 import "net"
 import "os"
 import "net/rpc"
@@ -10,15 +13,14 @@ type TaskState[T comparable] struct {
 	Idle       []T
 	InProgress []T
 	Completed  []T
-	//TaskToWorker map[T]Worker
 }
 
 type Coordinator struct {
-	// Your definitions here.
-	MapTasks        []MapTask
-	MapTaskState    TaskState[MapTask]
-	ReduceTasks     []ReduceTask
-	ReduceTaskState TaskState[ReduceTask]
+	sync.Mutex
+	registerChannel chan string
+
+	nReduce int
+	files   []string
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -32,6 +34,12 @@ type Coordinator struct {
 func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
 	reply.Y = args.X + 1
 	return nil
+}
+
+func initialiseCoordinator(files []string, nReduce int) *Coordinator {
+	c := Coordinator{files: files, nReduce: nReduce}
+	c.registerChannel = make(chan string)
+	return &c
 }
 
 //
@@ -48,6 +56,9 @@ func (c *Coordinator) server() {
 		log.Fatal("listen error:", e)
 	}
 	go http.Serve(l, nil)
+}
+
+func (c *Coordinator) run() {
 }
 
 //
@@ -68,16 +79,8 @@ func (c *Coordinator) Done() bool {
 // nReduce is the number of reduce tasks to use.
 //
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
-	c := Coordinator{}
-
-	// Create map tasks.
-	c.MapTasks = files
-	c.MapTaskState.Idle = make([]MapTask, len(c.MapTasks))
-	copy(c.MapTaskState.Idle, c.MapTasks)
-
-	// TODO: store number of reduce tasks
-
-	// Spin up a server.
+	c := initialiseCoordinator(files, nReduce)
 	c.server()
-	return &c
+	c.run()
+	return c
 }

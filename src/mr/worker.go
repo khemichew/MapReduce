@@ -1,6 +1,11 @@
 package mr
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
+	"os"
+)
 import "log"
 import "net/rpc"
 import "hash/fnv"
@@ -28,14 +33,65 @@ func ihash(key string) int {
 //
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
+	task := Task{}
 
-	// Your worker implementation here.
+	ok := call("Coordinator.RequestTask", nil, &task)
+	if !ok {
+		log.Fatal("Master cannot be reached")
+	}
 
-	// TODO: register worker
-	// TODO: perform assigned tasks while available
+	switch task.Type {
+	case MapTask:
+		doMap(&task, mapf)
+	case ReduceTask:
+		doReduce(&task, reducef)
+	}
 
-	// uncomment to send the Example RPC to the coordinator.
-	//CallExample()
+}
+
+// Read input file, apply map function, and partition results
+// into nReduce intermediate files.
+func doMap(task *Task, mapf func(string, string) []KeyValue) {
+	// Read input file
+	content, err := ioutil.ReadFile(task.Input)
+	if err != nil {
+		log.Fatalf("cannot read %v", task.Input)
+	}
+
+	// Apply map function
+	kva := mapf(task.Input, string(content))
+
+	// Partition results into r intermediate files, in
+	// the form of mr-task-i; i in range(0, r)
+	files := make(map[string]*os.File)
+
+	for _, kv := range kva {
+		partition := ihash(kv.Key) % task.NumComplementTask
+		output := fmt.Sprintf("mr-%d-%d", task.NumTask, partition)
+
+		// Create file if it does not exist
+		if _, ok := files[output]; !ok {
+			file, err := os.Create(output)
+			if err != nil {
+				log.Fatalf("cannot create intermediate file %v", output)
+			}
+			defer file.Close()
+			files[output] = file
+		}
+
+		// Append to file
+		enc := json.NewEncoder(files[output])
+		err := enc.Encode(&kv)
+
+		if err != nil {
+			log.Fatalf("unable to write to intermediate file %v", output)
+		}
+	}
+
+	// Deferred calls run here
+}
+
+func doReduce(task *Task, reducef func(string, []string) string) {
 
 }
 
