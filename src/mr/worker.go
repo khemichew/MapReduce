@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"sort"
 )
 import "log"
 import "net/rpc"
@@ -95,14 +96,6 @@ func doMap(task *Task, mapf func(string, string) []KeyValue) {
 // results in a single output file.
 // This effectively converts the data from row-major to column-major.
 func doReduce(task *Task, reducef func(string, []string) string) {
-	// Create output file
-	outputFilename := fmt.Sprintf("mr-out-%v", task.NumTask)
-	output, err := os.OpenFile(outputFilename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	defer output.Close()
-	if err != nil {
-		log.Fatalf("cannot create %v", outputFilename)
-	}
-
 	kva := make(map[string][]string)
 
 	// Process each intermediate file mr-i-task; i in range(0, m),
@@ -127,9 +120,25 @@ func doReduce(task *Task, reducef func(string, []string) string) {
 		}
 	}
 
+	// Sort key-value pair in map
+	keys := make([]string, len(kva))
+	for k := range kva {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	// Create output file
+	outputFilename := fmt.Sprintf("mr-out-%v", task.NumTask)
+	output, err := os.OpenFile(outputFilename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	defer output.Close()
+	if err != nil {
+		log.Fatalf("cannot create %v", outputFilename)
+	}
+
 	// Apply reduce function
-	for k, v := range kva {
-		if _, err := output.WriteString(reducef(k, v)); err != nil {
+	for _, k := range keys {
+		_, err := fmt.Fprintf(output, "%v %v\n", k, reducef(k, kva[k]))
+		if err != nil {
 			log.Fatalf("cannot write to %v", outputFilename)
 		}
 	}
