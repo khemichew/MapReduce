@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 	"sort"
+	"time"
 )
 import "log"
 import "net/rpc"
@@ -36,18 +37,21 @@ func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 	task := Task{}
 
-	ok := call("Coordinator.RequestTask", nil, &task)
-	if !ok {
-		log.Fatal("Master cannot be reached")
-	}
+	for {
+		ok := call("Coordinator.RequestTask", nil, &task)
+		if !ok {
+			break
+		}
 
-	switch task.Type {
-	case MapTask:
-		doMap(&task, mapf)
-	case ReduceTask:
-		doReduce(&task, reducef)
-	}
+		switch task.Type {
+		case MapTask:
+			doMap(&task, mapf)
+		case ReduceTask:
+			doReduce(&task, reducef)
+		}
 
+		time.Sleep(time.Second)
+	}
 }
 
 // Read input file, apply map function, and partition results
