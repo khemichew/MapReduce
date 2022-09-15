@@ -69,15 +69,15 @@ func GenerateTasks(files []string, nReduce int) (mapTasks, reduceTasks *Tasks) {
 	// Create map tasks
 	for i, file := range files {
 		task := &Task{Type: MapTask, InputFilepath: file, TaskId: i}
-		mapTasks.Node[i] = mapTasks.Queue[Idle].PushBack(task)
-		mapTasks.State[i] = Idle
+		mapTasks.Node[task.TaskId] = mapTasks.Queue[Idle].PushBack(task)
+		mapTasks.State[task.TaskId] = Idle
 	}
 
 	// Create reduce tasks
 	for i := 0; i < nReduce; i++ {
 		task := &Task{Type: ReduceTask, TaskId: i}
-		reduceTasks.Node[i] = reduceTasks.Queue[Idle].PushBack(task)
-		reduceTasks.State[i] = Idle
+		reduceTasks.Node[task.TaskId] = reduceTasks.Queue[Idle].PushBack(task)
+		reduceTasks.State[task.TaskId] = Idle
 	}
 
 	return
@@ -85,7 +85,11 @@ func GenerateTasks(files []string, nReduce int) (mapTasks, reduceTasks *Tasks) {
 
 // Return Task given Task.TaskId.
 func (tasks *Tasks) findTask(taskId int) *Task {
-	return tasks.Node[taskId].Value.(*Task)
+	if val, ok := tasks.Node[taskId]; ok {
+		return val.Value.(*Task)
+	} else {
+		return nil
+	}
 }
 
 // Insert task at the end of the queue, and update to latest state.

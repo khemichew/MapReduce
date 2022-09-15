@@ -98,7 +98,7 @@ func requestTask() (*WorkerTask, bool) {
 func reportTaskCompletion(task *WorkerTask) (bool, bool) {
 	args := ReportTaskArgs{WorkerId: os.Getpid(), TaskType: task.TaskType, TaskId: task.TaskId}
 	reply := ReportTaskReply{}
-	ok := call("Coordinator.ReportTask", args, reply)
+	ok := call("Coordinator.ReportTaskCompletion", args, reply)
 	return reply.Terminate, ok
 }
 
@@ -163,23 +163,25 @@ func doReduce(task *WorkerTask, reducef func(string, []string) string) {
 	// Process each intermediate file mr-i-task; i in range(0, m),
 	// where m is the number of mapped files
 	for i := 0; i < task.TotalMapTask; i++ {
-		inputFilename := fmt.Sprintf("mr-i-%v", task.TaskId)
+		inputFilename := fmt.Sprintf("mr-%v-%v", i, task.TaskId)
 		input, err := os.Open(inputFilename)
 		if err != nil {
 			log.Fatalf("cannot open %v", inputFilename)
 		}
 
+		var kv KeyValue
 		dec := json.NewDecoder(input)
 
 		// Partition data by key
 		for dec.More() {
-			var kv KeyValue
-			err := dec.Decode(&kv)
+			err = dec.Decode(&kv)
 			if err != nil {
 				log.Fatalf("corrupted data in %v", inputFilename)
 			}
 			kva[kv.Key] = append(kva[kv.Key], kv.Value)
 		}
+
+		input.Close()
 	}
 
 	// Sort key-value pair in map
@@ -193,7 +195,6 @@ func doReduce(task *WorkerTask, reducef func(string, []string) string) {
 	// files in the presence of a crash
 	outputFilename := fmt.Sprintf("mr-out-%v", task.TaskId)
 	output, err := os.CreateTemp("", outputFilename)
-	defer output.Close()
 	if err != nil {
 		log.Fatalf("cannot create %v", outputFilename)
 	}
@@ -211,6 +212,8 @@ func doReduce(task *WorkerTask, reducef func(string, []string) string) {
 	if err != nil {
 		log.Fatalf("cannot rename intermediate file %v", outputFilename)
 	}
+
+	output.Close()
 }
 
 //

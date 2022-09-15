@@ -19,9 +19,9 @@ type Coordinator struct {
 	reduceTasks *Tasks
 	// --------------------------------
 
-	// ------ Server ------
-	listener net.Listener
-	// --------------------
+	//// ------ Server ------
+	//listener net.Listener
+	//// --------------------
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -76,10 +76,10 @@ func (c *Coordinator) ReportTaskCompletion(args *ReportTaskArgs, reply *ReportTa
 	return nil
 }
 
-func (c *Coordinator) ShutdownListener(_, _ *interface{}) error {
-	c.listener.Close()
-	return nil
-}
+//func (c *Coordinator) ShutdownListener(_, _ *interface{}) error {
+//	c.listener.Close()
+//	return nil
+//}
 
 //
 // main/mrcoordinator.go calls Done() periodically to find out
@@ -101,20 +101,20 @@ func (c *Coordinator) startRPCServer() {
 	sockname := coordinatorSock()
 	os.Remove(sockname)
 	l, e := net.Listen("unix", sockname)
-	c.listener = l
+	//c.listener = l
 	if e != nil {
 		log.Fatal("listen error:", e)
 	}
 	go http.Serve(l, nil)
 }
 
-// TODO: Improve shutdown cleanup process
-func (c *Coordinator) shutdownRPCServer() {
-	ok := call("Coordinator.ShutdownListener", nil, nil)
-	if !ok {
-		log.Fatalf("error occured when shutting down server")
-	}
-}
+//// TODO: Improve shutdown cleanup process
+//func (c *Coordinator) shutdownRPCServer() {
+//	ok := call("Coordinator.ShutdownListener", nil, nil)
+//	if !ok {
+//		log.Fatalf("error occured when shutting down server")
+//	}
+//}
 
 // Countdown until time expires and check task status. If task is incomplete, the
 // coordinator reschedules the task.
