@@ -3,7 +3,6 @@ package mr
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"sort"
 	"time"
@@ -18,6 +17,14 @@ import "hash/fnv"
 type KeyValue struct {
 	Key   string
 	Value string
+}
+
+type WorkerTask struct {
+	TaskType        int
+	TaskId          int
+	InputFilepath   string
+	TotalMapTask    int
+	TotalReduceTask int
 }
 
 //
@@ -48,20 +55,20 @@ func Worker(mapf func(string, string) []KeyValue,
 		}
 
 		// Execute task and store results, then report completion
-		status, ok := &ReportTaskReply{Terminate: false}, true
-		switch task.Type {
+		terminate, ok := false, true
+		switch task.TaskType {
 		case MapTask:
 			doMap(task, mapf)
-			status, ok = reportTaskCompletion(task)
+			terminate, ok = reportTaskCompletion(task)
 		case ReduceTask:
 			doReduce(task, reducef)
-			status, ok = reportTaskCompletion(task)
+			terminate, ok = reportTaskCompletion(task)
 		case VoidTask: // do nothing
 		case ExitTask:
 			break
 		}
 
-		if status.Terminate || !ok {
+		if terminate || !ok {
 			break
 		}
 
@@ -71,38 +78,49 @@ func Worker(mapf func(string, string) []KeyValue,
 }
 
 // WorkerId generated only unique in a single machine
-func requestTask() (*Task, bool) {
+func requestTask() (*WorkerTask, bool) {
 	args := RequestTaskArgs{WorkerId: os.Getpid()}
-	reply := Task{}
+	reply := RequestTaskReply{}
 	ok := call("Coordinator.RequestTask", &args, &reply)
-	return &reply, ok
+
+	// Create worker task
+	task := WorkerTask{
+		TaskType:        reply.TaskType,
+		TaskId:          reply.TaskId,
+		InputFilepath:   reply.InputFilepath,
+		TotalMapTask:    reply.TotalMapTask,
+		TotalReduceTask: reply.TotalReduceTask,
+	}
+
+	return &task, ok
 }
 
-func reportTaskCompletion(task *Task) (*ReportTaskReply, bool) {
+func reportTaskCompletion(task *WorkerTask) (bool, bool) {
+	args := ReportTaskArgs{WorkerId: os.Getpid(), TaskType: task.TaskType, TaskId: task.TaskId}
 	reply := ReportTaskReply{}
-	ok := call("Coordinator.ReportTask", task, reply)
-	return &reply, ok
+	ok := call("Coordinator.ReportTask", args, reply)
+	return reply.Terminate, ok
 }
 
 // Read input file, apply map function, and partition results
 // into nReduce intermediate files.
-func doMap(task *Task, mapf func(string, string) []KeyValue) {
+func doMap(task *WorkerTask, mapf func(string, string) []KeyValue) {
 	// Read input file
-	content, err := ioutil.ReadFile(task.Input)
+	content, err := os.ReadFile(task.InputFilepath)
 	if err != nil {
-		log.Fatalf("cannot read %v", task.Input)
+		log.Fatalf("cannot read %v", task.InputFilepath)
 	}
 
 	// Apply map function
-	kva := mapf(task.Input, string(content))
+	kva := mapf(task.InputFilepath, string(content))
 
 	// For an assigned task, partition results into r intermediate files,
 	// in the form of mr-task-i; i in range(0, r)
 	files := make(map[string]*os.File)
 
 	for _, kv := range kva {
-		partition := ihash(kv.Key) % task.NumReduceTask
-		filename := fmt.Sprintf("mr-%d-%d", task.Id, partition)
+		partition := ihash(kv.Key) % task.TotalReduceTask
+		filename := fmt.Sprintf("mr-%d-%d", task.TaskId, partition)
 
 		// Create temporary files so user cannot observe partially
 		// written file in the presence of a crash
@@ -139,13 +157,13 @@ func doMap(task *Task, mapf func(string, string) []KeyValue) {
 // Read intermediate files, apply reduce function, and store
 // results in a single output file.
 // This effectively converts the data from row-major to column-major.
-func doReduce(task *Task, reducef func(string, []string) string) {
+func doReduce(task *WorkerTask, reducef func(string, []string) string) {
 	kva := make(map[string][]string)
 
 	// Process each intermediate file mr-i-task; i in range(0, m),
 	// where m is the number of mapped files
-	for i := 0; i < task.NumMapTask; i++ {
-		inputFilename := fmt.Sprintf("mr-i-%v", task.Id)
+	for i := 0; i < task.TotalMapTask; i++ {
+		inputFilename := fmt.Sprintf("mr-i-%v", task.TaskId)
 		input, err := os.Open(inputFilename)
 		if err != nil {
 			log.Fatalf("cannot open %v", inputFilename)
@@ -173,7 +191,7 @@ func doReduce(task *Task, reducef func(string, []string) string) {
 
 	// Create temporary output file so user cannot observe partially written
 	// files in the presence of a crash
-	outputFilename := fmt.Sprintf("mr-out-%v", task.Id)
+	outputFilename := fmt.Sprintf("mr-out-%v", task.TaskId)
 	output, err := os.CreateTemp("", outputFilename)
 	defer output.Close()
 	if err != nil {

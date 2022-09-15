@@ -23,10 +23,8 @@ type ExampleReply struct {
 }
 
 // Add your RPC definitions here.
-type TaskType int
-
 const (
-	MapTask TaskType = iota
+	MapTask int = iota
 	ReduceTask
 	VoidTask
 	ExitTask
@@ -34,6 +32,20 @@ const (
 
 type RequestTaskArgs struct {
 	WorkerId int
+}
+
+type RequestTaskReply struct {
+	TaskType        int
+	TaskId          int
+	InputFilepath   string // Only applicable for map tasks
+	TotalMapTask    int
+	TotalReduceTask int
+}
+
+type ReportTaskArgs struct {
+	WorkerId int
+	TaskType int
+	TaskId   int
 }
 
 type ReportTaskReply struct {

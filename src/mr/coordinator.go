@@ -3,17 +3,20 @@ package mr
 import (
 	"log"
 	"sync"
+	"time"
 )
 import "net"
 import "os"
 import "net/rpc"
 import "net/http"
 
+const Timeout = 10
+
 type Coordinator struct {
 	sync.Mutex
 	// ------- CRITICAL SECTION -------
-	mapTasks    Tasks
-	reduceTasks Tasks
+	mapTasks    *Tasks
+	reduceTasks *Tasks
 	// --------------------------------
 
 	// ------ Server ------
@@ -22,11 +25,52 @@ type Coordinator struct {
 }
 
 // Your code here -- RPC handlers for the worker to call.
-func (c *Coordinator) RequestTask(args *interface{}, reply *Task) error {
+func (c *Coordinator) RequestTask(args *RequestTaskArgs, reply *RequestTaskReply) error {
+	c.Lock()
+
+	// Get task allocation
+	// Sequential: process all map tasks before processing reduce tasks
+	var task *Task
+	if !c.mapTasks.Done() {
+		task = c.mapTasks.getIdleTask()
+	} else if !c.reduceTasks.Done() {
+		task = c.reduceTasks.getIdleTask()
+	} else {
+		task = &Task{Type: VoidTask}
+	}
+
+	// Assign task to worker
+	task.WorkerId = args.WorkerId
+
+	// Copy values
+	reply.TaskId = task.TaskId
+	reply.TaskType = task.Type
+	reply.TotalMapTask = c.mapTasks.Capacity
+	reply.TotalReduceTask = c.reduceTasks.Capacity
+	reply.InputFilepath = task.InputFilepath
+
+	// Check for task completion
+	c.Unlock()
+	go c.waitTask(task.Type, task.TaskId)
 	return nil
 }
 
-func (c *Coordinator) ReportTaskCompletion(args *Task, reply *ReportTaskReply) error {
+func (c *Coordinator) ReportTaskCompletion(args *ReportTaskArgs, reply *ReportTaskReply) error {
+	if !(args.TaskType == MapTask || args.TaskType == ReduceTask) {
+		return nil
+	}
+
+	c.Lock()
+	defer c.Unlock()
+	switch args.TaskType {
+	case MapTask:
+		c.mapTasks.UpdateTask(args.TaskId, Completed)
+	case ReduceTask:
+		c.reduceTasks.UpdateTask(args.TaskId, Completed)
+	}
+
+	reply.Terminate = c.mapTasks.Done() && c.reduceTasks.Done()
+
 	return nil
 }
 
@@ -77,7 +121,31 @@ func (c *Coordinator) shutdownRPCServer() {
 func (c *Coordinator) Done() bool {
 	c.Lock()
 	defer c.Unlock()
-	return c.mapTasks.done() && c.reduceTasks.done()
+	return c.mapTasks.Done() && c.reduceTasks.Done()
+}
+
+// Countdown until time expires and check task status. If task is incomplete, the
+// coordinator reschedules the task.
+func (c *Coordinator) waitTask(taskType, taskId int) {
+	if !(taskType == MapTask || taskType == ReduceTask) {
+		return
+	}
+
+	// Wait for timeout seconds
+	<-time.After(time.Second * Timeout)
+
+	c.Lock()
+	defer c.Unlock()
+	switch taskType {
+	case MapTask:
+		if c.mapTasks.State[taskId] == InProgress {
+			c.mapTasks.UpdateTask(taskId, Idle)
+		}
+	case ReduceTask:
+		if c.reduceTasks.State[taskId] == InProgress {
+			c.reduceTasks.UpdateTask(taskId, Idle)
+		}
+	}
 }
 
 //
@@ -92,7 +160,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 }
 
 func initialiseCoordinator(files []string, nReduce int) *Coordinator {
-	c := Coordinator{}
-
+	mapTasks, reduceTasks := GenerateTasks(files, nReduce)
+	c := Coordinator{mapTasks: mapTasks, reduceTasks: reduceTasks}
 	return &c
 }
