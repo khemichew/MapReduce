@@ -88,18 +88,6 @@ func (tasks *Tasks) findTask(taskId int) *Task {
 	return tasks.Node[taskId].Value.(*Task)
 }
 
-// Assign an idle task if available, otherwise return a void task
-func (tasks *Tasks) getIdleTask() *Task {
-	idleTasks := tasks.Queue[Idle]
-	if idleTasks.Len() > 0 {
-		task := idleTasks.Front().Value.(*Task)
-		tasks.removeTask(task)
-		tasks.insertTask(task, InProgress)
-		return task
-	}
-	return &Task{Type: VoidTask}
-}
-
 // Insert task at the end of the queue, and update to latest state.
 func (tasks *Tasks) insertTask(task *Task, state int) {
 	tasks.Node[task.TaskId] = tasks.Queue[state].PushBack(task)
@@ -112,11 +100,31 @@ func (tasks *Tasks) removeTask(task *Task) {
 	tasks.Queue[state].Remove(tasks.Node[task.TaskId])
 }
 
+// Assign an idle task if available, otherwise return a void task
+func (tasks *Tasks) GetIdleTask() *Task {
+	idleTasks := tasks.Queue[Idle]
+	if idleTasks.Len() > 0 {
+		task := idleTasks.Front().Value.(*Task)
+		tasks.removeTask(task)
+		tasks.insertTask(task, InProgress)
+		return task
+	}
+	return &Task{Type: VoidTask}
+}
+
 // UpdateTask updates the state of the task to Idle, InProgress, or Completed.
 func (tasks *Tasks) UpdateTask(taskId int, newState int) {
 	task := tasks.findTask(taskId)
 	tasks.removeTask(task)
 	tasks.insertTask(task, newState)
+}
+
+func (tasks *Tasks) GetWorker(taskId int) int {
+	return tasks.findTask(taskId).WorkerId
+}
+
+func (tasks *Tasks) SetWorker(taskId int, workerId int) {
+	tasks.findTask(taskId).WorkerId = workerId
 }
 
 // Return status of phase completion.

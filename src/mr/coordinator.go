@@ -32,9 +32,9 @@ func (c *Coordinator) RequestTask(args *RequestTaskArgs, reply *RequestTaskReply
 	// Sequential: process all map tasks before processing reduce tasks
 	var task *Task
 	if !c.mapTasks.Done() {
-		task = c.mapTasks.getIdleTask()
+		task = c.mapTasks.GetIdleTask()
 	} else if !c.reduceTasks.Done() {
-		task = c.reduceTasks.getIdleTask()
+		task = c.reduceTasks.GetIdleTask()
 	} else {
 		task = &Task{Type: VoidTask}
 	}
@@ -62,15 +62,17 @@ func (c *Coordinator) ReportTaskCompletion(args *ReportTaskArgs, reply *ReportTa
 
 	c.Lock()
 	defer c.Unlock()
-	switch args.TaskType {
-	case MapTask:
-		c.mapTasks.UpdateTask(args.TaskId, Completed)
-	case ReduceTask:
-		c.reduceTasks.UpdateTask(args.TaskId, Completed)
+
+	tasks := c.getTasks(args.TaskType)
+
+	// A task is considered complete if task is not rescheduled
+	recordedWorkerId := tasks.GetWorker(args.TaskId)
+	if recordedWorkerId == args.WorkerId {
+		tasks.UpdateTask(args.TaskId, Completed)
 	}
 
+	// Allow worker to terminate without having to invoke another RPC
 	reply.Terminate = c.mapTasks.Done() && c.reduceTasks.Done()
-
 	return nil
 }
 
@@ -87,6 +89,16 @@ func (c *Coordinator) ShutdownListener(_, _ *interface{}) error {
 func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
 	reply.Y = args.X + 1
 	return nil
+}
+
+//
+// main/mrcoordinator.go calls Done() periodically to find out
+// if the entire job has finished.
+//
+func (c *Coordinator) Done() bool {
+	c.Lock()
+	defer c.Unlock()
+	return c.mapTasks.Done() && c.reduceTasks.Done()
 }
 
 //
@@ -114,16 +126,6 @@ func (c *Coordinator) shutdownRPCServer() {
 	}
 }
 
-//
-// main/mrcoordinator.go calls Done() periodically to find out
-// if the entire job has finished.
-//
-func (c *Coordinator) Done() bool {
-	c.Lock()
-	defer c.Unlock()
-	return c.mapTasks.Done() && c.reduceTasks.Done()
-}
-
 // Countdown until time expires and check task status. If task is incomplete, the
 // coordinator reschedules the task.
 func (c *Coordinator) waitTask(taskType, taskId int) {
@@ -136,15 +138,22 @@ func (c *Coordinator) waitTask(taskType, taskId int) {
 
 	c.Lock()
 	defer c.Unlock()
+
+	// Timeout: reset task to idle state
+	tasks := c.getTasks(taskType)
+	if tasks.State[taskId] == InProgress {
+		tasks.UpdateTask(taskId, Idle)
+	}
+}
+
+func (c *Coordinator) getTasks(taskType int) *Tasks {
 	switch taskType {
 	case MapTask:
-		if c.mapTasks.State[taskId] == InProgress {
-			c.mapTasks.UpdateTask(taskId, Idle)
-		}
+		return c.mapTasks
 	case ReduceTask:
-		if c.reduceTasks.State[taskId] == InProgress {
-			c.reduceTasks.UpdateTask(taskId, Idle)
-		}
+		return c.reduceTasks
+	default:
+		return nil
 	}
 }
 
@@ -154,13 +163,8 @@ func (c *Coordinator) waitTask(taskType, taskId int) {
 // nReduce is the number of reduce tasks to use.
 //
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
-	c := initialiseCoordinator(files, nReduce)
-	c.startRPCServer()
-	return c
-}
-
-func initialiseCoordinator(files []string, nReduce int) *Coordinator {
 	mapTasks, reduceTasks := GenerateTasks(files, nReduce)
 	c := Coordinator{mapTasks: mapTasks, reduceTasks: reduceTasks}
+	c.startRPCServer()
 	return &c
 }
