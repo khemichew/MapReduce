@@ -82,16 +82,6 @@ func (c *Coordinator) ShutdownListener(_, _ *interface{}) error {
 }
 
 //
-// an example RPC handler.
-//
-// the RPC argument and reply types are defined in rpc.go.
-//
-func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
-	reply.Y = args.X + 1
-	return nil
-}
-
-//
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
 //
