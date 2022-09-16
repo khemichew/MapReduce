@@ -9,19 +9,12 @@ package mr
 import "os"
 import "strconv"
 
-const (
-	MapTask int = iota
-	ReduceTask
-	VoidTask
-	ExitTask
-)
-
 type RequestTaskArgs struct {
 	WorkerId int
 }
 
 type RequestTaskReply struct {
-	TaskType        int
+	Phase           Phase
 	TaskId          int
 	InputFilepath   string // Only applicable for map tasks
 	TotalMapTask    int
@@ -30,7 +23,7 @@ type RequestTaskReply struct {
 
 type ReportTaskArgs struct {
 	WorkerId int
-	TaskType int
+	Phase    Phase
 	TaskId   int
 }
 

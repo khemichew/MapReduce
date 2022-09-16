@@ -36,7 +36,7 @@ func (c *Coordinator) RequestTask(args *RequestTaskArgs, reply *RequestTaskReply
 	} else if !c.reduceTasks.Done() {
 		task = c.reduceTasks.GetIdleTask()
 	} else {
-		task = &Task{Type: VoidTask}
+		task = &Task{Phase: VoidTask}
 	}
 
 	// Assign task to worker
@@ -44,31 +44,31 @@ func (c *Coordinator) RequestTask(args *RequestTaskArgs, reply *RequestTaskReply
 
 	// Copy values
 	reply.TaskId = task.TaskId
-	reply.TaskType = task.Type
+	reply.Phase = task.Phase
 	reply.TotalMapTask = c.mapTasks.Capacity
 	reply.TotalReduceTask = c.reduceTasks.Capacity
 	reply.InputFilepath = task.InputFilepath
 
 	// Check for task completion
 	c.Unlock()
-	go c.waitTask(task.Type, task.TaskId)
+	go c.waitTask(task.Phase, task.TaskId)
 	return nil
 }
 
 func (c *Coordinator) ReportTaskCompletion(args *ReportTaskArgs, reply *ReportTaskReply) error {
-	if !(args.TaskType == MapTask || args.TaskType == ReduceTask) {
+	if !(args.Phase == MapTask || args.Phase == ReduceTask) {
 		return nil
 	}
 
 	c.Lock()
 	defer c.Unlock()
 
-	tasks := c.getTasks(args.TaskType)
+	tasks := c.getTasks(args.Phase)
 
 	// A task is considered complete if task is not rescheduled
 	recordedWorkerId := tasks.GetWorker(args.TaskId)
 	if recordedWorkerId == args.WorkerId {
-		tasks.UpdateTask(args.TaskId, Completed)
+		tasks.UpdateTaskState(args.TaskId, Completed)
 	}
 
 	// Allow worker to terminate without having to invoke another RPC
@@ -118,8 +118,8 @@ func (c *Coordinator) startRPCServer() {
 
 // Countdown until time expires and check task status. If task is incomplete, the
 // coordinator reschedules the task.
-func (c *Coordinator) waitTask(taskType, taskId int) {
-	if !(taskType == MapTask || taskType == ReduceTask) {
+func (c *Coordinator) waitTask(phase Phase, taskId int) {
+	if !(phase == MapTask || phase == ReduceTask) {
 		return
 	}
 
@@ -130,14 +130,14 @@ func (c *Coordinator) waitTask(taskType, taskId int) {
 	defer c.Unlock()
 
 	// Timeout: reset task to idle state
-	tasks := c.getTasks(taskType)
+	tasks := c.getTasks(phase)
 	if tasks.State[taskId] == InProgress {
-		tasks.UpdateTask(taskId, Idle)
+		tasks.UpdateTaskState(taskId, Idle)
 	}
 }
 
-func (c *Coordinator) getTasks(taskType int) *Tasks {
-	switch taskType {
+func (c *Coordinator) getTasks(phase Phase) *Tasks {
+	switch phase {
 	case MapTask:
 		return c.mapTasks
 	case ReduceTask:

@@ -20,7 +20,7 @@ type KeyValue struct {
 }
 
 type WorkerTask struct {
-	TaskType        int
+	Phase           Phase
 	TaskId          int
 	InputFilepath   string
 	TotalMapTask    int
@@ -56,7 +56,7 @@ func Worker(mapf func(string, string) []KeyValue,
 
 		// Execute task and store results, then report completion
 		terminate, ok := false, true
-		switch task.TaskType {
+		switch task.Phase {
 		case MapTask:
 			doMap(task, mapf)
 			terminate, ok = reportTaskCompletion(task)
@@ -85,7 +85,7 @@ func requestTask() (*WorkerTask, bool) {
 
 	// Create worker task
 	task := WorkerTask{
-		TaskType:        reply.TaskType,
+		Phase:           reply.Phase,
 		TaskId:          reply.TaskId,
 		InputFilepath:   reply.InputFilepath,
 		TotalMapTask:    reply.TotalMapTask,
@@ -96,7 +96,7 @@ func requestTask() (*WorkerTask, bool) {
 }
 
 func reportTaskCompletion(task *WorkerTask) (bool, bool) {
-	args := ReportTaskArgs{WorkerId: os.Getpid(), TaskType: task.TaskType, TaskId: task.TaskId}
+	args := ReportTaskArgs{WorkerId: os.Getpid(), Phase: task.Phase, TaskId: task.TaskId}
 	reply := ReportTaskReply{}
 	ok := call("Coordinator.ReportTaskCompletion", args, reply)
 	return reply.Terminate, ok

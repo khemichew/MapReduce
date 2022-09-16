@@ -2,19 +2,12 @@ package mr
 
 import "container/list"
 
-const (
-	Idle = iota
-	InProgress
-	Completed
-	TotalState
-)
-
 // Task is uniquely identified by TaskId.
 // There are three types of tasks: MapTask, ReduceTask, and in
 // the case of VoidTask and ExitTask, no other fields will be populated.
 type Task struct {
-	// One of MapTask, ReduceTask.
-	Type int
+	// One of MapTask, ReduceTask, VoidTask, ExitTask.
+	Phase Phase
 	// Input filepath. Only applicable for map tasks.
 	InputFilepath string
 	// Unique identifier for each task.
@@ -28,54 +21,46 @@ type Task struct {
 // Note: the data structure is *not* thread-safe. Use mutexes accordingly.
 type Tasks struct {
 	// [IdleQueue, InProgressQueue, CompletedQueue]
-	Queue []*list.List
-	// maps Task.TaskId to individual node containing Task
+	Queue map[Progression]*list.List
+	// maps Task.TaskId to individual node containing Task.
 	Node map[int]*list.Element
 	// maps Task.TaskId to one of Idle, InProgress, or Completed.
-	State map[int]int
+	State map[int]Progression
 	// Number of total tasks. Constant once initialised.
 	Capacity int
 }
 
-// Helper function to allocate memory used in a Tasks instance. Used in GenerateTasks.
-func initialiseTasks(nMap, nReduce int) (mapTasks, reduceTasks *Tasks) {
-	mapTasks = &Tasks{
-		Queue:    make([]*list.List, TotalState),
+// Helper function to allocate memory for Tasks.
+func allocateTasks(capacity int) *Tasks {
+	tasks := &Tasks{
+		Queue:    make(map[Progression]*list.List, TotalState),
 		Node:     make(map[int]*list.Element),
-		State:    make(map[int]int),
-		Capacity: nMap}
-	reduceTasks = &Tasks{
-		Queue:    make([]*list.List, TotalState),
-		Node:     make(map[int]*list.Element),
-		State:    make(map[int]int),
-		Capacity: nReduce}
-
-	for i := 0; i < TotalState; i++ {
-		mapTasks.Queue[i] = list.New()
+		State:    make(map[int]Progression),
+		Capacity: capacity,
 	}
 
-	for i := 0; i < TotalState; i++ {
-		reduceTasks.Queue[i] = list.New()
-	}
+	tasks.Queue[Idle] = list.New()
+	tasks.Queue[InProgress] = list.New()
+	tasks.Queue[Completed] = list.New()
 
-	return
+	return tasks
 }
 
 // Create a list of map and reduce tasks, ready to be allocated by the coordinator.
 func GenerateTasks(files []string, nReduce int) (mapTasks, reduceTasks *Tasks) {
 	nMap := len(files)
-	mapTasks, reduceTasks = initialiseTasks(nMap, nReduce)
+	mapTasks, reduceTasks = allocateTasks(nMap), allocateTasks(nReduce)
 
 	// Create map tasks
 	for i, file := range files {
-		task := &Task{Type: MapTask, InputFilepath: file, TaskId: i}
+		task := &Task{Phase: MapTask, InputFilepath: file, TaskId: i}
 		mapTasks.Node[task.TaskId] = mapTasks.Queue[Idle].PushBack(task)
 		mapTasks.State[task.TaskId] = Idle
 	}
 
 	// Create reduce tasks
 	for i := 0; i < nReduce; i++ {
-		task := &Task{Type: ReduceTask, TaskId: i}
+		task := &Task{Phase: ReduceTask, TaskId: i}
 		reduceTasks.Node[task.TaskId] = reduceTasks.Queue[Idle].PushBack(task)
 		reduceTasks.State[task.TaskId] = Idle
 	}
@@ -92,35 +77,30 @@ func (tasks *Tasks) findTask(taskId int) *Task {
 	}
 }
 
-// Insert task at the end of the queue, and update to latest state.
-func (tasks *Tasks) insertTask(task *Task, state int) {
-	tasks.Node[task.TaskId] = tasks.Queue[state].PushBack(task)
-	tasks.State[task.TaskId] = state
-}
-
-// Remove task from queue.
-func (tasks *Tasks) removeTask(task *Task) {
-	state := tasks.State[task.TaskId]
-	tasks.Queue[state].Remove(tasks.Node[task.TaskId])
-}
-
-// Assign an idle task if available, otherwise return a void task
+// GetIdleTask assigns an Idle task if available and updates it to InProgress;
+// otherwise it returns a void task
 func (tasks *Tasks) GetIdleTask() *Task {
 	idleTasks := tasks.Queue[Idle]
 	if idleTasks.Len() > 0 {
-		task := idleTasks.Front().Value.(*Task)
-		tasks.removeTask(task)
-		tasks.insertTask(task, InProgress)
-		return task
+		taskId := idleTasks.Front().Value.(*Task).TaskId
+		tasks.UpdateTaskState(taskId, InProgress)
+		return tasks.findTask(taskId)
 	}
-	return &Task{Type: VoidTask}
+	return &Task{Phase: VoidTask}
 }
 
-// UpdateTask updates the state of the task to Idle, InProgress, or Completed.
-func (tasks *Tasks) UpdateTask(taskId int, newState int) {
-	task := tasks.findTask(taskId)
-	tasks.removeTask(task)
-	tasks.insertTask(task, newState)
+// UpdateTaskState updates the state of the task to Idle, InProgress, or Completed.
+func (tasks *Tasks) UpdateTaskState(taskId int, newState Progression) {
+	// Remove task
+	state := tasks.State[taskId]
+	task := tasks.Queue[state].Remove(tasks.Node[taskId]).(*Task)
+
+	// Insert task
+	node := tasks.Queue[newState].PushBack(task)
+	tasks.Node[taskId] = node
+
+	// Update state
+	tasks.State[taskId] = newState
 }
 
 func (tasks *Tasks) GetWorker(taskId int) int {

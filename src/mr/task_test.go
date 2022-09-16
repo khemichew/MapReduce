@@ -1,7 +1,6 @@
 package mr
 
 import (
-	"container/list"
 	"fmt"
 	"strconv"
 	"testing"
@@ -10,13 +9,13 @@ import (
 var (
 	dummyTasks = []Task{
 		{
-			Type:          MapTask,
+			Phase:         MapTask,
 			InputFilepath: "input1",
 			TaskId:        12,
 			WorkerId:      2,
 		},
 		{
-			Type:          MapTask,
+			Phase:         MapTask,
 			InputFilepath: "input2",
 			TaskId:        42,
 			WorkerId:      21,
@@ -26,15 +25,7 @@ var (
 
 // Generate tasks data structure with dummy tasks.
 func setup() *Tasks {
-	tasks := Tasks{
-		Queue:    make([]*list.List, TotalState),
-		Node:     make(map[int]*list.Element),
-		State:    make(map[int]int),
-		Capacity: len(dummyTasks)}
-
-	for i := 0; i < TotalState; i++ {
-		tasks.Queue[i] = list.New()
-	}
+	tasks := allocateTasks(len(dummyTasks))
 
 	// Create dummy tasks
 	for i := 0; i < len(dummyTasks); i++ {
@@ -43,7 +34,7 @@ func setup() *Tasks {
 		tasks.State[task.TaskId] = Idle
 	}
 
-	return &tasks
+	return tasks
 }
 
 func TestGenerateTasks(t *testing.T) {
@@ -108,4 +99,35 @@ func TestFindTask(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetIdleTask(t *testing.T) {
+	tests := map[string]struct {
+		tasks *Tasks
+		want  Phase
+	}{
+		"empty":     {allocateTasks(0), VoidTask},
+		"non-empty": {setup(), MapTask},
+	}
+
+	taskTypes := map[Phase]string{
+		MapTask:    "MapTask",
+		ReduceTask: "ReduceTask",
+		VoidTask:   "VoidTask",
+		ExitTask:   "ExitTask",
+	}
+
+	for tn, tc := range tests {
+		// Compare task names
+		t.Run(tn, func(t *testing.T) {
+			for p := tc.tasks.Queue[Idle].Front(); p != nil; p = p.Next() {
+				fmt.Printf("task: %v\n", taskTypes[p.Value.(*Task).Phase])
+			}
+
+			if got := tc.tasks.GetIdleTask().Phase; tc.want != got {
+				t.Fatalf("expected: %v, got: %v", taskTypes[tc.want], taskTypes[got])
+			}
+		})
+	}
+
 }
