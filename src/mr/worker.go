@@ -189,7 +189,7 @@ func doReduce(task *WorkerTask, reducef func(string, []string) string) {
 	}
 
 	// Sort key-value pair in map
-	keys := make([]string, len(kva))
+	var keys []string
 	for k := range kva {
 		keys = append(keys, k)
 	}
