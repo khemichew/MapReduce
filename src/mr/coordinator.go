@@ -116,6 +116,7 @@ func (c *Coordinator) waitTask(phase Phase, taskId int) {
 	tasks := c.getTasks(phase)
 	if tasks.State[taskId] == InProgress {
 		tasks.UpdateTaskState(taskId, Idle)
+		tasks.SetWorker(taskId, -1)
 	}
 }
 

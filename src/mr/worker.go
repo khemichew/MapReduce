@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"time"
 )
@@ -147,13 +148,14 @@ func doMap(task *WorkerTask, mapf func(string, string) []KeyValue) {
 
 	// Atomically rename files
 	for filename, temp := range files {
-		err := os.Rename(temp.Name(), filename)
-		if err != nil {
-			log.Fatalf("cannot rename intermediate file %v", filename)
-		}
 		err = temp.Close()
 		if err != nil {
 			log.Fatalf("cannot close file %v", filename)
+		}
+
+		err := os.Rename(temp.Name(), filename)
+		if err != nil {
+			log.Fatalf("cannot rename intermediate file %v", filename)
 		}
 	}
 }
@@ -165,9 +167,15 @@ func doReduce(task *WorkerTask, reducef func(string, []string) string) {
 	kva := make(map[string][]string)
 
 	// Process each intermediate file mr-i-task; i in range(0, m),
-	// where m is the number of mapped files
-	for i := 0; i < task.TotalMapTask; i++ {
-		inputFilename := fmt.Sprintf("mr-%v-%v", i, task.TaskId)
+	// *if* file exists, where m is the number of mapped files
+
+	// Note: not all mr-i-task files may exist
+	// the partition number produced by hashing might not cover the
+	// entire range(0, m)
+	pattern := fmt.Sprintf("mr-*-%v", task.TaskId)
+	intermediate, _ := filepath.Glob(pattern)
+
+	for _, inputFilename := range intermediate {
 		input, err := os.Open(inputFilename)
 		if err != nil {
 			log.Fatalf("cannot open %v", inputFilename)
@@ -212,12 +220,11 @@ func doReduce(task *WorkerTask, reducef func(string, []string) string) {
 	}
 
 	// Atomically rename file
+	output.Close()
 	err = os.Rename(output.Name(), outputFilename)
 	if err != nil {
 		log.Fatalf("cannot rename intermediate file %v", outputFilename)
 	}
-
-	output.Close()
 }
 
 //
