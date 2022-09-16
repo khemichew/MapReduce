@@ -68,13 +68,12 @@ func GenerateTasks(files []string, nReduce int) (mapTasks, reduceTasks *Tasks) {
 	return
 }
 
-// Return Task given Task.TaskId.
-func (tasks *Tasks) findTask(taskId int) *Task {
+// Return Task given Task.TaskId. Function signature obeys "comma, ok" idiom.
+func (tasks *Tasks) findTask(taskId int) (*Task, bool) {
 	if val, ok := tasks.Node[taskId]; ok {
-		return val.Value.(*Task)
-	} else {
-		return nil
+		return val.Value.(*Task), ok
 	}
+	return nil, false
 }
 
 // GetIdleTask assigns an Idle task if available and updates it to InProgress;
@@ -84,13 +83,18 @@ func (tasks *Tasks) GetIdleTask() *Task {
 	if idleTasks.Len() > 0 {
 		taskId := idleTasks.Front().Value.(*Task).TaskId
 		tasks.UpdateTaskState(taskId, InProgress)
-		return tasks.findTask(taskId)
+		task, _ := tasks.findTask(taskId)
+		return task
 	}
 	return &Task{Phase: VoidTask}
 }
 
 // UpdateTaskState updates the state of the task to Idle, InProgress, or Completed.
 func (tasks *Tasks) UpdateTaskState(taskId int, newState Progression) {
+	if _, ok := tasks.findTask(taskId); !ok {
+		return
+	}
+
 	// Remove task
 	state := tasks.State[taskId]
 	task := tasks.Queue[state].Remove(tasks.Node[taskId]).(*Task)
@@ -103,12 +107,19 @@ func (tasks *Tasks) UpdateTaskState(taskId int, newState Progression) {
 	tasks.State[taskId] = newState
 }
 
-func (tasks *Tasks) GetWorker(taskId int) int {
-	return tasks.findTask(taskId).WorkerId
+// Returns Task.WorkerId if task exists. Function signature obeys "comma, ok" idiom.
+func (tasks *Tasks) GetWorker(taskId int) (int, bool) {
+	if task, ok := tasks.findTask(taskId); ok {
+		return task.WorkerId, ok
+	}
+	return 0, false
 }
 
+// Assign task to new worker if task exists, otherwise do nothing.
 func (tasks *Tasks) SetWorker(taskId int, workerId int) {
-	tasks.findTask(taskId).WorkerId = workerId
+	if task, ok := tasks.findTask(taskId); ok {
+		task.WorkerId = workerId
+	}
 }
 
 // Return status of phase completion.

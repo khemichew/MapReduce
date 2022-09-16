@@ -66,8 +66,9 @@ func (c *Coordinator) ReportTaskCompletion(args *ReportTaskArgs, reply *ReportTa
 	tasks := c.getTasks(args.Phase)
 
 	// A task is considered complete if task is not rescheduled
-	recordedWorkerId := tasks.GetWorker(args.TaskId)
-	if recordedWorkerId == args.WorkerId {
+	expectedWorkerId, ok := tasks.GetWorker(args.TaskId)
+
+	if ok && expectedWorkerId == args.WorkerId {
 		tasks.UpdateTaskState(args.TaskId, Completed)
 	}
 

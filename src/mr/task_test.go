@@ -21,6 +21,19 @@ var (
 			WorkerId:      21,
 		},
 	}
+
+	taskTypes = map[Phase]string{
+		MapTask:    "MapTask",
+		ReduceTask: "ReduceTask",
+		VoidTask:   "VoidTask",
+		ExitTask:   "ExitTask",
+	}
+
+	taskStates = map[Progression]string{
+		Idle:       "Idle",
+		InProgress: "InProgress",
+		Completed:  "Completed",
+	}
 )
 
 // Generate tasks data structure with dummy tasks.
@@ -92,8 +105,8 @@ func TestFindTask(t *testing.T) {
 	for i, tc := range tests {
 		// Compare task names
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
-			if task := tasks.findTask(tc.taskId); task == nil {
-				t.Fatalf("expected: %v, got: nil", tc.want)
+			if task, ok := tasks.findTask(tc.taskId); !ok {
+				t.Fatalf("expected: %v, but no tasks found", tc.want)
 			} else if task.InputFilepath != tc.want {
 				t.Fatalf("expected: %v, got: %v", tc.want, task.InputFilepath)
 			}
@@ -106,19 +119,11 @@ func TestGetIdleTask(t *testing.T) {
 		tasks *Tasks
 		want  Phase
 	}{
-		"empty":     {allocateTasks(0), VoidTask},
-		"non-empty": {setup(), MapTask},
-	}
-
-	taskTypes := map[Phase]string{
-		MapTask:    "MapTask",
-		ReduceTask: "ReduceTask",
-		VoidTask:   "VoidTask",
-		ExitTask:   "ExitTask",
+		"no-tasks":      {allocateTasks(0), VoidTask},
+		"contain-tasks": {setup(), MapTask},
 	}
 
 	for tn, tc := range tests {
-		// Compare task names
 		t.Run(tn, func(t *testing.T) {
 			for p := tc.tasks.Queue[Idle].Front(); p != nil; p = p.Next() {
 				fmt.Printf("task: %v\n", taskTypes[p.Value.(*Task).Phase])
@@ -129,5 +134,135 @@ func TestGetIdleTask(t *testing.T) {
 			}
 		})
 	}
+}
 
+func TestGetWorker(t *testing.T) {
+	tasks := setup()
+
+	tests := map[string]struct {
+		taskId       int
+		wantWorkerId int
+	}{
+		"task-does-not-exist": {-1, 0},
+		"task-exists":         {12, 2},
+	}
+
+	for tn, tc := range tests {
+		t.Run(tn, func(t *testing.T) {
+			if got, _ := tasks.GetWorker(tc.taskId); got != tc.wantWorkerId {
+				t.Fatalf("expected: %v, got: %v", tc.wantWorkerId, got)
+			}
+		})
+	}
+}
+
+func TestSetWorker(t *testing.T) {
+	tests := map[string]struct {
+		tasks        *Tasks
+		taskId       int
+		newWorkerId  int
+		wantWorkerId int
+	}{
+		"task-does-not-exist": {setup(), -1, -1, 0},
+		"task-exists":         {setup(), 12, 6, 6},
+	}
+
+	for tn, tc := range tests {
+		t.Run(tn, func(t *testing.T) {
+			tc.tasks.SetWorker(tc.taskId, tc.newWorkerId)
+			if got, _ := tc.tasks.GetWorker(tc.taskId); got != tc.wantWorkerId {
+				t.Fatalf("expected: %v, got: %v", tc.wantWorkerId, got)
+			}
+		})
+	}
+}
+
+func TestUpdateTaskStateDoesNothingIfTaskDoesNotExist(t *testing.T) {
+	tests := map[string]struct {
+		tasks    *Tasks
+		taskId   int
+		newState Progression
+	}{
+		"no-tasks":      {allocateTasks(0), 11, Completed},
+		"contain-tasks": {setup(), 11, Idle},
+	}
+
+	for tn, tc := range tests {
+		t.Run(tn, func(t *testing.T) {
+			tc.tasks.UpdateTaskState(tc.taskId, tc.newState)
+			if _, ok := tc.tasks.State[tc.taskId]; ok {
+				t.Fatalf("did not expect tasks.State to contain non-existant task")
+			}
+
+			if _, ok := tc.tasks.Node[tc.taskId]; ok {
+				t.Fatalf("did not expect tasks.Node to contain non-existant task")
+			}
+
+			// Search for entire queue
+			l, _ := tc.tasks.Queue[tc.newState]
+			for p := l.Front(); p != nil; p = p.Next() {
+				if gotTaskId := p.Value.(*Task).TaskId; gotTaskId == tc.taskId {
+					t.Fatalf("did not expect queue of new state to contain non-existant task")
+				}
+			}
+		})
+	}
+}
+
+func TestUpdateTaskWithExistingTasks(t *testing.T) {
+	tests := map[string]struct {
+		tasks    *Tasks
+		taskId   int
+		newState Progression
+	}{
+		"task-1": {setup(), 12, Completed},
+		"task-2": {setup(), 42, Completed},
+	}
+
+	for tn, tc := range tests {
+		t.Run(tn, func(t *testing.T) {
+			prevState := tc.tasks.State[tc.taskId]
+
+			tc.tasks.UpdateTaskState(tc.taskId, tc.newState)
+
+			// Verify task removed from previous state queue
+			l := tc.tasks.Queue[prevState]
+			for p := l.Front(); p != nil; p = p.Next() {
+				if gotTaskId := p.Value.(*Task).TaskId; gotTaskId == tc.taskId {
+					t.Fatalf("task was not removed from previous state queue")
+				}
+			}
+
+			// Verify task inserted to new state queue
+			l = tc.tasks.Queue[tc.newState]
+			if l.Back().Value.(*Task).TaskId != tc.taskId {
+				t.Fatalf("task was not inserted into new state queue")
+			}
+
+			// Check state of task
+			if gotState := tc.tasks.State[tc.taskId]; gotState != tc.newState {
+				t.Fatalf("expected: %v, got %v", taskStates[tc.newState], taskStates[gotState])
+			}
+		})
+	}
+}
+
+func TestTasksDone(t *testing.T) {
+	tasks := setup()
+	checkNotDone := func(done bool) {
+		if done {
+			t.Fatalf("some tasks idle/in progress, but returned all tasks completed instead")
+		}
+	}
+	checkDone := func(done bool) {
+		if !done {
+			t.Fatalf("all tasks completed but returned some tasks idle/in progress")
+		}
+	}
+
+	checkNotDone(tasks.Done())
+	tasks.UpdateTaskState(12, Completed)
+	checkNotDone(tasks.Done())
+	tasks.UpdateTaskState(42, Completed)
+	checkDone(tasks.Done())
 }
