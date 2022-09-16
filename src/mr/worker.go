@@ -53,7 +53,7 @@ func Worker(mapf func(string, string) []KeyValue,
 		// Request a task
 		task, ok := requestTask()
 		if !ok { // Master unresponsive
-			log.Fatalf("Lost connection to master server. Worker %v exiting...", os.Getpid())
+			return
 		}
 
 		// Execute task and store results, then report completion
@@ -67,15 +67,11 @@ func Worker(mapf func(string, string) []KeyValue,
 			terminate, ok = reportTaskCompletion(task)
 		case VoidTask: // do nothing
 		case ExitTask:
-			log.Fatalf("No more tasks. Worker %v exiting...", os.Getpid())
+			return
 		}
 
-		if terminate {
-			log.Fatalf("No more tasks. Worker %v exiting...", os.Getpid())
-		}
-
-		if !ok {
-			log.Fatalf("Connection issues occured. Worker %v exiting...", os.Getpid())
+		if terminate || !ok {
+			return
 		}
 
 		// Wait for a second before requesting again

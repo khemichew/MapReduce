@@ -32,7 +32,7 @@ func (c *Coordinator) RequestTask(args *RequestTaskArgs, reply *RequestTaskReply
 	} else if !c.reduceTasks.Done() {
 		task = c.reduceTasks.GetIdleTask()
 	} else {
-		task = &Task{Phase: VoidTask}
+		task = &Task{Phase: ExitTask}
 	}
 
 	// Assign task to worker
