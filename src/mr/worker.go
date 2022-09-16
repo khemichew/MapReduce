@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"time"
 )
@@ -173,7 +174,15 @@ func doReduce(task *WorkerTask, reducef func(string, []string) string) {
 	// the partition number produced by hashing might not cover the
 	// entire range(0, m)
 	pattern := fmt.Sprintf("mr-*-%v", task.TaskId)
-	intermediate, _ := filepath.Glob(pattern)
+	matchingFiles, _ := filepath.Glob(pattern)
+	var intermediate []string
+	// Filter irrelevant inputs
+	for _, file := range matchingFiles {
+		pattern := fmt.Sprintf("mr-([0-9]+)-%v", task.TaskId)
+		if match, _ := regexp.MatchString(pattern, file); match {
+			intermediate = append(intermediate, file)
+		}
+	}
 
 	for _, inputFilename := range intermediate {
 		input, err := os.Open(inputFilename)
